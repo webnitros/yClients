@@ -1,0 +1,438 @@
+<?php
+
+class yClients
+{
+    /** @var modX $modx */
+    public $modx;
+
+    /** @var YclientsApiClient|null $client */
+    public $client = null;
+
+    /** @var array|null $response */
+    public $response = null;
+
+    /** @var array|null $error */
+    public $error = null;
+
+    /* @var array|null $params */
+    private $params = null;
+
+    /* @var array|null $params */
+    public $company_id = null;
+
+    /* @var array $initialized */
+    public $initialized = array();
+
+    /* @var array $config */
+    public $config = array();
+
+    /** @var pdoFetch $pdoTools */
+    public $pdoTools;
+
+    /**
+     * @param modX $modx
+     * @param array $config
+     */
+    function __construct(modX &$modx, array $config = [])
+    {
+        $this->modx =& $modx;
+        $corePath = MODX_CORE_PATH . 'components/yclients/';
+        $assetsUrl = MODX_ASSETS_URL . 'components/yclients/';
+
+        $this->config = array_merge([
+            'corePath' => $corePath,
+            'modelPath' => $corePath . 'model/',
+            'processorsPath' => $corePath . 'processors/',
+
+            'connectorUrl' => $assetsUrl . 'connector.php',
+            'assetsUrl' => $assetsUrl,
+            'cssUrl' => $assetsUrl . 'css/',
+            'jsUrl' => $assetsUrl . 'js/',
+        ], $config);
+
+
+        $this->company_id = $this->modx->getOption('yclients_company_id', $config, null);
+
+        $this->modx->addPackage('yclients', $this->config['modelPath']);
+        $this->modx->lexicon->load('yclients:default');
+        $this->modx->lexicon->load('yclients:api');
+
+
+        if ($this->pdoTools = $this->modx->getService('pdoFetch')) {
+            $this->pdoTools->setConfig($this->config);
+        }
+
+        $this->loadService();
+    }
+
+
+    /**
+     * Initializes component into different contexts.
+     *
+     * @param string $ctx The context to load. Defaults to web.
+     * @param array $scriptProperties Properties for initialization.
+     *
+     * @return bool
+     */
+    public function initialize($ctx = 'web', $scriptProperties = array())
+    {
+        $this->config = array_merge($this->config, $scriptProperties);
+
+        $this->config['ctx'] = $ctx;
+        $this->config['pageId'] = $this->modx->resource->id;
+
+        $today = date('Y-m-d', time());
+        $this->config['today'] = $today;
+        $this->config['startDate'] = $today;
+
+        if (!empty($this->initialized[$ctx])) {
+            return true;
+        }
+        switch ($ctx) {
+            case 'mgr':
+                break;
+            default:
+                if (!defined('MODX_API_MODE') || !MODX_API_MODE) {
+                    $config = $this->makePlaceholders($this->config);
+                    $config_js = preg_replace(array('/^\n/', '/\t{5}/'), '', '
+							yClients = {};
+							yClientsConfig = ' . $this->modx->toJSON($this->config) . ';
+					');
+
+                    if ($css = $this->modx->getOption('yclients_frontend_css')) {
+                        $this->modx->regClientCSS(str_replace($config['pl'], $config['vl'], $css));
+                    }
+                    if ($css = $this->modx->getOption('yclients_frontend_css_datepicker')) {
+                        $this->modx->regClientCSS(str_replace($config['pl'], $config['vl'], $css));
+                    }
+
+
+                    if ($js = trim($this->modx->getOption('yclients_frontend_js_datepicker'))) {
+                        if (!empty($js) && preg_match('/\.js/i', $js)) {
+                            $this->modx->regClientScript(str_replace($config['pl'], $config['vl'], $js));
+                        }
+                    }
+                    if ($js = trim($this->modx->getOption('yclients_frontend_js_datepicker_ru'))) {
+                        if (!empty($js) && preg_match('/\.js/i', $js)) {
+                            $this->modx->regClientScript(str_replace($config['pl'], $config['vl'], $js));
+                        }
+                    }
+
+                    $this->modx->regClientStartupScript("<script type=\"text/javascript\">\n" . $config_js . "\n</script>", true);
+                    if ($js = trim($this->modx->getOption('yclients_frontend_js'))) {
+                        if (!empty($js) && preg_match('/\.js/i', $js)) {
+                            $this->modx->regClientScript(str_replace($config['pl'], $config['vl'], $js));
+                        }
+                    }
+
+
+                }
+
+                break;
+        }
+        return true;
+    }
+
+    /**
+     * Method for transform array to placeholders
+     *
+     * @var array $array With keys and values
+     * @var string $prefix Placeholders prefix
+     *
+     * @return array $array Two nested arrays With placeholders and values
+     */
+    public function makePlaceholders(array $array = array(), $prefix = '')
+    {
+        $result = array('pl' => array(), 'vl' => array());
+        foreach ($array as $k => $v) {
+            if (is_array($v)) {
+                $result = array_merge_recursive($result, $this->makePlaceholders($v, $k . '.'));
+            } else {
+                $result['pl'][$prefix . $k] = '[[+' . $prefix . $k . ']]';
+                $result['vl'][$prefix . $k] = $v;
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * @return bool|null|YclientsApiClient
+     */
+    public function loadService()
+    {
+        if ($this->client == null) {
+
+            // Default classes
+            if (!class_exists('YclientsApiClient')) {
+                require_once dirname(dirname(__FILE__)) . '/lib/YclientsClient.php';
+                require_once dirname(dirname(__FILE__)) . '/lib/YclientsException.php';
+            }
+            // Custom cart class
+            if (!class_exists('YclientsApiClient')) {
+                return false;
+            }
+            $this->client = new YclientsApiClient($this, $this->config);
+
+            if (!$this->client instanceof YclientsApiClient or !$this->client->setToken()) {
+                $this->modx->log(modX::LOG_LEVEL_ERROR, 'Could not initialize YclientsApiClient class: ');
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * @param $msg
+     * @param array $params
+     * @throws YclientsException
+     */
+    public function error($msg, $params = array())
+    {
+        $message = $this->modx->lexicon($msg, $params);
+        if ($message == $msg) {
+            $message = $msg;
+        }
+        throw new YclientsException(is_array($message) ? print_r($message, 1) : $message);
+    }
+
+
+    /**
+     * Отправка запроса
+     * @param string $service
+     * @param array|null $params
+     * @return array|boolean
+     */
+    protected function request($service, $params = null, $method = 'GET', $auth = false)
+    {
+        try {
+            return $this->client->request($service, $params, $method);
+        } catch (YclientsException $e) {
+            $this->error = $e->getMessage();
+        }
+        return false;
+    }
+
+    /**
+     * @return bool
+     */
+    public function isError()
+    {
+        $res = $this->client->getResponse();
+        return count($res['error']) > 0;
+    }
+
+    /**
+     * @return mixed
+     */
+    public function getErrors()
+    {
+        $res = $this->client->getResponse();
+        return $res['error'];
+    }
+
+
+    /**
+     * @param array|null $params
+     * @return array|null
+     */
+    private function getParams($params = null)
+    {
+        $data = null;
+        if (is_array($params) and count($params) > 0) {
+            $data = array_merge(array(), $params);
+        }
+        return $data;
+    }
+
+
+    /**
+     * Вернет полный ответ от сервера
+     * @return array
+     */
+    public function getResponse()
+    {
+        return $this->client->getResponse();
+    }
+
+
+    /**
+     * Вернет коллекцию записей
+     * @param $company_id
+     * @return array|boolean
+     */
+    public function getRecords($company_id, $page = 1, $count = 100, $params = array())
+    {
+        $params = array_merge([
+            'page' => $page,
+            'count' => $count,
+        ], $params);
+        return $this->request('records/' . $company_id, $params, 'GET');
+    }
+
+
+    /**
+     * Вернет список сотрудников
+     * @param int $company_id
+     * @return array|boolean
+     */
+    public function getStaffs($company_id)
+    {
+        return $this->request('staff/' . $company_id . '/', array(), 'GET');
+    }
+
+
+    /**
+     * Вернет сеансов для сотрудника
+     * @param int $company_id
+     * @param int $staff_id
+     * @return array|null
+     */
+    public function getSeances($company_id, $staff_id, $date)
+    {
+        return $this->request('timetable/seances/' . $company_id . '/' . $staff_id . '/' . $date, null, 'GET');
+    }
+
+    /**
+     * Вернет сеансов для сотрудника
+     * http://api.yclients.com/api/v1/services/company_id/service_id?staff_id=&category_id=
+     * @param int $company_id
+     * @param array|null $params
+     * @return array|null
+     */
+    public function getService($company_id, $params = null)
+    {
+        return $this->request('services/' . $company_id . '/service_id', $this->getParams($params), 'GET');
+    }
+
+    /**
+     * Вернет список категорий услуг
+     * http://api.yclients.com/api/v1/service_categories/company_id/id?staff_id=1
+     * @param int $company_id
+     * @param array|null $params
+     * @return array|boolean
+     */
+    public function getCategories($company_id, $params = null)
+    {
+        return $this->request('service_categories/' . $company_id . '/id', $this->getParams($params), 'GET');
+    }
+
+    /**
+     * Вернет список групповых событий
+     * http://api.yclients.com/api/v1/activity/company_id/search/?from=&till=
+     * @param int $company_id
+     * @param array|null $params
+     * @return array|boolean
+     */
+    public function getGroupEventsFrom($company_id, $params = null)
+    {
+        return $this->request('activity/' . $company_id . '/search/', $this->getParams($params), 'GET');
+    }
+
+
+    /**
+     * Онлайн-запись / Список ближайших сеансов сотрудника / Получить список ближайших доступных сеансов
+     * GET http://api.yclients.com/api/v1/book_staff_seances/company_id/staff_id/?service_ids=&event_ids=&datetime=
+     * @param int $company_id
+     * @param int $staff_id
+     * @param array|null $params
+     * @return array|boolean
+     */
+    public function getBookStaffSeances($company_id, $staff_id, $params = null)
+    {
+        return $this->request('book_staff_seances/' . $company_id . '/' . $staff_id . '/', $this->getParams($params), 'GET');
+    }
+
+
+    /**
+     * Получить список сотрудников доступных для бронирования
+     * http://api.yclients.com/api/v1/book_staff/company_id?service_ids=&event_ids=&datetime=&without_seances=
+     * @param int $company_id
+     * @param array|null $params
+     * @return array|boolean
+     */
+    public function getBookStaff($company_id, $params = null)
+    {
+        return $this->request('book_staff/' . $company_id, $this->getParams($params), 'GET');
+    }
+
+
+    /**
+     * Онлайн-запись / Коллекция услуг доступных для бронирования / Получить список услуг доступных для бронирования
+     * http://api.yclients.com/api/v1/book_services/company_id?staff_id=0&datetime=%60%60&service_ids=&event_ids=
+     * @param int $company_id
+     * @param array|null $params
+     * @return array|boolean
+     */
+    public function getBookServices($company_id, $params = null)
+    {
+        return $this->request('book_services/' . $company_id, $this->getParams($params), 'GET');
+    }
+
+
+    /**
+     * Список доступных дат для бронирования
+     * http://api.yclients.com/api/v1/book_services/company_id?staff_id=0&datetime=%60%60&service_ids=&event_ids=
+     * @param int $company_id
+     * @param array|null $params
+     * @return array|boolean
+     */
+    public function getBookDates($company_id, $params = null)
+    {
+        return $this->request('book_dates/' . $company_id, $this->getParams($params), 'GET');
+    }
+
+
+    /**
+     * Вернет список дат групповых событий
+     * Возращает только даты с событиями
+     * http://api.yclients.com/api/v1/activity/company_id/search_dates/?from=&till=
+     * @param int $company_id
+     * @param array|null $params
+     * @return array|boolean
+     */
+    public function getGroupEventsDate($company_id, $params = null)
+    {
+        return $this->request('activity/' . $company_id . '/search_dates/', $this->getParams($params), 'GET');
+    }
+
+
+    /**
+     * Создать запись на сеанс
+     * http://api.yclients.com/api/v1/book_record/company_id
+     * @param int $company_id
+     * @param array|null $params
+     * @return array|boolean
+     */
+    public function createBookRecord($company_id, $params = null)
+    {
+        return $this->request('book_record/' . $company_id, $this->getParams($params), 'POST');
+    }
+
+
+    /**
+     * Создать запись на сеанс
+     * POST http://api.yclients.com/api/v1/activity/company_id/activity_id/book
+     * @param int $company_id
+     * @param int $activity_id
+     * @param array|null $params
+     * @return array|boolean
+     */
+    public function createGroupsEvent($company_id, $activity_id, $params = null)
+    {
+        return $this->request('activity/' . $company_id . '/' . $activity_id . '/book', $this->getParams($params), 'POST');
+    }
+
+
+    /**
+     * Создать запись на сеанс
+     * http://api.yclients.com/api/v1/book_check/company_id
+     * @param int $company_id
+     * @param array|null $params
+     * @return array|boolean
+     */
+    public function createBookCheck($company_id, $params = null)
+    {
+        return $this->request('book_check/' . $company_id, $this->getParams($params), 'POST');
+    }
+
+}

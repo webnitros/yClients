@@ -1,0 +1,29 @@
+.date-block.fll.more-calendar {
+    margin-right: 54px !important;
+    margin-left: 0 !important;
+}
+.date-block.fll {
+    cursor: pointer;
+}
+.date-block.fll {
+    margin-right: 33px !important;
+    margin-left: 33px !important;
+}
+
+.yclientsschedule-nav {
+    border-bottom: 1px dashed #adadad;
+    padding-bottom: 10px;
+}
+.yclients-calendar {
+    padding: 0 !important;
+}
+.yclients-calendar input {
+    background: #dee2e2;
+    border: 0;
+    height: 40px;
+    text-align: center;
+    width: 186px;
+    font-size: 15px;
+    color: #000;
+}
+
